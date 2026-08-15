@@ -1,0 +1,430 @@
+# Universal Geographic Distance & Admin Mapper — Master Prompt
+
+**Version:** 1.0  
+**Works with:** Claude Sonnet / Opus (claude.ai or API)  
+**Produces:** Excel sheets, interactive HTML maps, distance + travel-time tables  
+**Geography:** Any country, state, district, or administrative division
+
+---
+
+## How to use this document
+
+Copy the relevant prompt block below, fill in the `[ ]` placeholders, and paste it to Claude. Each prompt is self-contained — Claude needs no other context.
+
+There are **four prompts** in this file:
+
+| # | Prompt | What it makes |
+|---|--------|---------------|
+| 1 | Distance & Travel Time Sheet | Excel sheet: one origin → many destinations |
+| 2 | Administrative Unit Workbook | Full Excel workbook for any region's admin divisions |
+| 3 | Downloadable Interactive Map | Self-contained HTML choropleth map |
+| 4 | Full Pipeline (all three above) | Everything at once |
+
+---
+
+---
+
+# PROMPT 1 — Distance & Travel Time Sheet
+
+> **Use when:** You have one starting point and a list of destinations (block HQs, town centres, admin offices, etc.) and want distances + travel times in Excel.
+
+```
+I need an Excel sheet (.xlsx) calculating road distances and travel times 
+from one origin to a list of destinations.
+
+## Origin
+Coordinates: [LAT],[LON]
+Label: [NAME OF ORIGIN LOCATION — e.g. "District Collector Office, Balrampur"]
+
+## Destinations
+[PASTE YOUR TABLE HERE — one row per destination, with at minimum:
+ Name | Latitude | Longitude
+ You can also include: District | Division | State | any other columns]
+
+## Geography context
+Country: [e.g. India]
+Region: [e.g. Uttar Pradesh — Devipatan Division]
+Road type: [e.g. "rural district roads" / "mix of NH and state highways" / "urban"]
+
+## Calculation method
+- Straight-line distance: Haversine formula (great-circle)
+- Road distance: straight-line × [SINUOSITY FACTOR — use 1.3 for rural India, 
+  1.2 for urban India, 1.15 for Europe, 1.25 for rural USA; or state your own]
+- Average speed: [SPEED in km/h — use 40 for rural India, 60 for state highways, 
+  30 for urban, 80 for motorways]
+- Formula: travel time = road distance ÷ speed
+
+## Output specification
+Single Excel tab named "Distance & Travel Time". Columns in this exact order:
+  A  — Row number
+  B  — Destination name
+  C  — [Any grouping column — e.g. District / County / Province]
+  D  — [Any second grouping column — e.g. Division / State]
+  E  — Latitude (4 decimal places)
+  F  — Longitude (4 decimal places)
+  G  — Straight-line distance (km, 1 decimal)
+  H  — Estimated road distance (km, 1 decimal)
+  I  — Estimated travel time (format: "45m" or "1h 20m")
+  J  — "Get Directions" hyperlink opening Google Maps from origin to destination
+
+## Styling rules (follow exactly)
+- Header row: dark background (#2D3748), white bold Arial 10, height 30
+- Data rows: alternate white (#FFFFFF) and light grey (#F7F6F2)
+- Travel time column (I): colour-code cells —
+    green  (#D1FAE5, font #065F46) = under 30 minutes
+    amber  (#FEF3C7, font #92400E) = 30 to 60 minutes
+    red    (#FEE2E2, font #991B1B) = over 60 minutes
+- If destinations span multiple districts/counties: colour-band the grouping 
+  column (column C) with a distinct light tint per group
+- Sort rows: nearest to farthest (ascending by column G)
+- Freeze row 1 (header); apply auto-filter
+- Add an AVERAGE row at the bottom for columns G and H
+- Add a legend below the data: travel time colour key + grouping colour key
+- Rows 1–3: title, origin label + coordinates, methodology note (italic grey)
+- Number formats: G and H → "0.0"; E and F → "0.0000"
+
+## Hyperlink formula pattern
+=HYPERLINK("https://www.google.com/maps/dir/[ORIGIN_LAT],[ORIGIN_LON]/[DEST_LAT],[DEST_LON]","Get Directions")
+
+## After building
+1. Save to disk
+2. Run formula recalculation to verify 0 errors
+3. Deliver the file for download
+
+Do not add extra sheets. Do not add a map. Just the one clean sheet.
+```
+
+---
+
+---
+
+# PROMPT 2 — Administrative Unit Workbook
+
+> **Use when:** You want a comprehensive Excel workbook documenting an administrative hierarchy — e.g. a country's states, a state's districts, a district's blocks/tehsils.
+
+```
+Create a comprehensive Excel workbook (.xlsx) for the administrative 
+geography of [REGION NAME — e.g. "Uttar Pradesh, India" / "Bavaria, Germany" 
+/ "Oyo State, Nigeria"].
+
+## Administrative levels to include
+Level 1 (top): [e.g. Division / Prefecture / Province] — [COUNT if known]
+Level 2 (mid): [e.g. District / County / LGA] — [COUNT if known]
+Level 3 (bottom): [e.g. Block / Tehsil / Ward / Commune] — [COUNT if known]
+
+## Data to include per Level 2 unit (one row each)
+- Name
+- Parent unit (Level 1)
+- Area in km² (from official census or best available source)
+- Total population (state the census year)
+- Population density (persons per km²) — calculate: population ÷ area
+- Count of Level 3 sub-units
+- Total urban/municipal area (km²) — sum of all city/town jurisdictions
+- Urban coverage % — calculate: urban area ÷ total area
+- Largest city / municipal body name
+- City jurisdiction type (e.g. Municipal Corporation / Nagar Palika / Town Council)
+
+## Data to include per Level 3 unit (one row each, separate sheet)
+- Name
+- Parent Level 2 unit
+- Parent Level 1 unit
+- Approximate latitude of HQ (4 decimal places)
+- Approximate longitude of HQ (4 decimal places)
+- Google Maps hyperlink: =HYPERLINK("https://maps.google.com/?q=LAT,LON","View on Map")
+
+## Sheets required (in this order)
+Sheet 1 — "[Level 2] Summary"
+  Columns: Name | Level1 | Area km² | Population | Density /km² | 
+           [Level3] Count | Urban Area km² | Urban % | Largest City | City Type
+  One row per Level 2 unit, sorted alphabetically
+  Totals / averages row at the bottom
+  Auto-filter on header; freeze header row
+
+Sheet 2 — "Municipal Bodies"
+  Columns: [Level2 Name] | [Level1 Name] | Municipal Body | Body Type | 
+           Area km² | [Level2] Total Area km² | Coverage %
+  One row per city/town (districts with multiple cities = multiple rows)
+  Coverage % = HYPERLINK formula column: area ÷ district area
+  Auto-filter; freeze header
+
+Sheet 3 — "[Level1] Summary"  
+  Rollup by Level 1 unit:
+  Columns: Level1 Name | [Level2] Count | Total Area km² | Total Population | 
+           Avg Density /km² | Total [Level3] Count | Total Urban km²
+  Totals row at bottom
+
+Sheet 4 — "[Level3] — Lat & Lon"
+  One row per Level 3 unit with lat/lon and Maps hyperlink
+  Columns: # | Name | [Level2] | [Level1] | Latitude | Longitude | View on Map
+  Auto-filter; freeze header
+  After building this sheet, verify unit counts per Level 2 match 
+  official census totals. State any discrepancies clearly.
+
+## Data quality rules
+- State the census year for all population and area data
+- Mark coordinates as "approximate centroids — GIS orientation only"
+- If a Level 2 boundary changed after the census (new unit carved out), 
+  use POST-reorganisation boundaries and note the change year
+- Do not list Level 3 units under the old parent if they were 
+  transferred to a new unit after reorganisation
+- Flag any count you are uncertain about with "(unverified)" 
+
+## Styling rules
+- Each sheet: no gridlines, Arial 10 font throughout
+- Headers: dark background, white bold text, height 30
+- Alternating row fills: white / very light grey
+- Density column: colour-band cells by tier:
+    < 100 /km²  → lightest blue
+    100–500      → light blue  
+    500–1000     → medium blue
+    1000–2000    → dark blue
+    > 2000       → darkest blue (white font)
+- Totals/averages row: light warm grey (#E8E4DC), bold
+
+## After building
+1. Save to disk
+2. Run formula recalculation — must report 0 errors
+3. Deliver the file for download
+```
+
+---
+
+---
+
+# PROMPT 3 — Downloadable Interactive Map
+
+> **Use when:** You want a self-contained HTML map that opens in any browser, requires no server, and lets users click regions for details.
+
+```
+Create a self-contained interactive HTML map (.html file) for [REGION NAME].
+The file must work by double-clicking it in any browser — no server, no internet 
+required after first load.
+
+## Map data
+Administrative units to show: [e.g. "All 75 districts of Uttar Pradesh" / 
+  "All 36 districts of Maharashtra" / "All counties of Ireland"]
+Boundary source to use: 
+  [Choose one:
+   A. "Use the GeoJSON/TopoJSON at this URL: [URL]"
+   B. "Find a suitable open-source boundary file from GitHub or a CDN — 
+       document which one you use in a comment at the top of the HTML"
+   C. "Use Natural Earth data via CDN"]
+Name field in the boundary file: [e.g. "district" / "NAME_2" / "name" — 
+  or write "auto-detect from properties"]
+
+## Choropleth variable
+Colour the map by: [e.g. "population density (persons/km²)" / "total area" / 
+  "number of sub-units" / "any numeric field you have"]
+Colour scale: [e.g. "5 equal buckets from light to dark blue" / 
+  "diverging red-white-green" / "sequential yellow-orange-red"]
+
+## Click interaction
+When user clicks a region, show a panel with:
+[List exactly what you want displayed, e.g.:
+  - District name
+  - Division / parent unit
+  - Area in km² (from GeoJSON geometry, calculated live)
+  - Census area in km² (from your embedded data — show both for comparison)
+  - Population
+  - Population density
+  - Number of blocks/tehsils/wards
+  - Urban area km²
+  - List of municipal bodies]
+
+## Sidebar
+Left or right sidebar with:
+- Searchable, scrollable list of all regions
+- Each item shows name + key stat (e.g. area, density)
+- Clicking a list item highlights that region on the map
+- Density/value legend
+
+## Styling
+- Clean minimal design, works on mobile and desktop
+- CSS variables for colours (so it works on light and dark OS themes)
+- Tooltip on hover showing name + key stat
+- Selected region: thicker border, slight opacity change
+
+## Embedded data
+Embed this data as a JS object inside the HTML (do not fetch it — it must work offline):
+[PASTE YOUR DATA TABLE HERE, or write "use Census 2011 data for [region]"]
+
+## Name aliases
+If the boundary file uses old or alternate names, map them to canonical names:
+[List any known aliases, e.g. "Allahabad → Prayagraj" / "Bombay → Mumbai"
+ or write "none known — auto-detect"]
+
+## After building
+Save as a .html file and deliver for download.
+Add a comment block at the top of the file documenting:
+  - Boundary data source and CDN URL
+  - Census/data source and year
+  - Libraries used (D3, TopoJSON, etc.)
+```
+
+---
+
+---
+
+# PROMPT 4 — Full Pipeline (Map + Workbook + Distance Sheet)
+
+> **Use when:** You want everything at once for a new region.
+
+```
+I am setting up a complete geographic data package for [REGION NAME, COUNTRY].
+
+Please build all three outputs below in sequence. Deliver each file as it 
+is completed — don't wait until the end.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT 1 — Interactive HTML Map
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Paste the filled-in Prompt 3 body here]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT 2 — Administrative Workbook
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Paste the filled-in Prompt 2 body here]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT 3 — Distance & Travel Time Sheet
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Paste the filled-in Prompt 1 body here]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SHARED RULES (apply to all three outputs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Census year for all data: [YEAR]
+- Administrative level names used in this region:
+    Level 1: [e.g. Division / Prefecture / Region]
+    Level 2: [e.g. District / County / LGA]
+    Level 3: [e.g. Block / Tehsil / Ward / Commune]
+- Known boundary reorganisations since census:
+    [List any, e.g. "District X was split into X and Y in 2015" — or "none"]
+- Language for labels: [English / local language / bilingual]
+- Coordinate system: WGS84 decimal degrees (standard GPS)
+```
+
+---
+
+---
+
+# Reference — Sinuosity Factors and Speed Assumptions
+
+Use these to fill in Prompt 1. Adjust based on what you know about your geography.
+
+## Road sinuosity factor (straight-line → road distance multiplier)
+
+| Road type | Factor | Notes |
+|-----------|--------|-------|
+| Rural India (district roads) | **1.30** | Winding roads, few bypasses |
+| Rural India (state highways) | **1.20** | Straighter but still indirect |
+| Urban India | **1.25** | Grid + one-ways |
+| Rural sub-Saharan Africa | **1.40** | More indirect routing |
+| Rural Europe | **1.20** | Better road network |
+| Urban Europe | **1.15** | Denser grid |
+| Rural USA/Canada | **1.15** | Highway-centric planning |
+| Urban USA | **1.20** | Grid cities |
+| Mountainous terrain (any) | **1.50–1.70** | Add 0.2–0.4 for hills |
+
+## Average speed assumptions
+
+| Road type | Speed |
+|-----------|-------|
+| Rural India — district roads | **40 km/h** |
+| Rural India — state highway | **60 km/h** |
+| Urban India | **25 km/h** |
+| Rural Africa — unpaved | **30 km/h** |
+| Rural Europe — country road | **70 km/h** |
+| European motorway | **110 km/h** |
+| US rural highway | **90 km/h** |
+| US urban | **40 km/h** |
+
+> **Note:** These are journey-average speeds, not road speed limits. They account for stops, junctions, and slow sections.
+
+---
+
+# Reference — Common Boundary Data Sources
+
+Free, open-source TopoJSON/GeoJSON sources you can reference in Prompt 3.
+
+| Coverage | Source | URL pattern |
+|----------|--------|-------------|
+| India — state & district | guneetnarula/indian-district-boundaries | `cdn.jsdelivr.net/gh/guneetnarula/indian-district-boundaries@master/topojson/state-wise/[state].json` |
+| India — all states | datameet/maps | GitHub: `datameet/maps` |
+| World countries | Natural Earth | `cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json` |
+| US counties | topojson/us-atlas | `cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json` |
+| European NUTS regions | Eurostat GISCO | `gisco-services.ec.europa.eu` |
+| Africa — admin1 | GADM | `gadm.org/data.html` |
+| Any country — admin1/2 | GADM via GitHub | Search `GADM [country] geojson` |
+
+---
+
+# Reference — What Claude needs to do its job accurately
+
+The more of these you provide, the less Claude has to guess.
+
+| You provide | Claude can do |
+|-------------|---------------|
+| Exact lat/lon of origin | Precise distance calculation |
+| Pasted destination table with lat/lon | Zero coordinate hallucination |
+| Expected unit count (e.g. "should be 15 blocks") | Self-verification |
+| Census year | Accurate data citation |
+| Known reorganisation dates | Correct boundary assignment |
+| Sinuosity factor | Documented, reproducible road distances |
+| Speed assumption | Documented, reproducible travel times |
+| Boundary file URL | No CDN guessing |
+
+---
+
+# What will cause Claude to hallucinate — and how to prevent it
+
+## Hallucination risk #1 — Administrative reorganisation
+**Risk:** Claude lists sub-units under the old parent district/county when they were transferred to a newly created unit.  
+**Fix:** Tell Claude: *"[Region X] was carved out of [Region Y] in [Year]. Do not list [Region X]'s units under [Region Y]."*
+
+## Hallucination risk #2 — Approximate coordinates presented as precise
+**Risk:** Claude generates coordinates that look like GPS readings but are estimated centroids.  
+**Fix:** Always label coordinates in the sheet as "approximate centroids — not survey-grade." Use the Maps hyperlink to verify each one.
+
+## Hallucination risk #3 — Plausible but wrong unit counts
+**Risk:** Claude generates a list of sub-units that looks complete but is missing entries or has duplicates under variant spellings.  
+**Fix:** Tell Claude the expected count. Say: *"[Region] should have exactly [N] blocks. Verify your list matches this. Flag any discrepancy."*
+
+## Hallucination risk #4 — Unit names with spelling variants
+**Risk:** Claude generates the same place under two different spellings as separate rows.  
+**Fix:** After the first draft, ask: *"Scan column B for duplicate place names under different spellings. List any you find."*
+
+## Hallucination risk #5 — Wrong data year mixing
+**Risk:** Claude silently mixes census data from different years (e.g. 2001 area, 2011 population).  
+**Fix:** Specify: *"All data must be from [YEAR] census. If a figure is from a different year, say so explicitly in parentheses."*
+
+## Hallucination risk #6 — Made-up boundary URLs
+**Risk:** Claude invents a plausible-sounding CDN URL that doesn't exist.  
+**Fix:** Either provide the URL yourself (from the reference table above), or say: *"Only use boundary URLs you can verify are in your training data. If unsure, state the source name and let me find the URL."*
+
+---
+
+# Minimal viable prompt (when you just want to try it fast)
+
+```
+I need an Excel distance sheet.
+
+Origin: [LAT],[LON]
+
+Destinations:
+[paste table]
+
+Road factor: 1.3
+Speed: 40 km/h
+
+Single sheet, columns: #, Name, District, Lat, Lon, Straight km, Road km, Travel time, Maps link.
+Sort nearest to farthest. Colour travel time green/amber/red (< 30m / 30–60m / > 60m).
+Deliver as .xlsx.
+```
+
+This minimal version works. The full Prompt 1 above gets you better styling, district colour-banding, averages row, and a legend.
+
+---
+
+*Created from the UP District Mapper session — generalized for any geography.*  
+*All prompts tested with Claude Sonnet 4.6.*
