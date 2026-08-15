@@ -1,0 +1,235 @@
+---
+name: up-district-mapper
+description: >
+  Use this skill whenever the user wants to: (1) map, explore, or download
+  district/block/municipal data for Uttar Pradesh; (2) calculate straight-line
+  or road distances + travel times from a GPS coordinate or named location to a
+  set of blocks or block HQs; (3) create an Excel workbook with district area,
+  population, density, blocks, or municipal coverage for UP; (4) generate an
+  interactive HTML map of UP districts coloured by density. Trigger on any of:
+  "UP districts", "Uttar Pradesh blocks", "vikas khand", "distance to blocks",
+  "travel time to blocks", "Devipatan division", "Prayagraj division", "district
+  map download", or whenever the user provides a lat/lon and a table of block
+  HQs asking for distances. Always use this skill — it encodes the exact data,
+  formulas, and Excel styling needed and avoids hallucination.
+compatibility:
+  python_packages: [openpyxl]
+  tools: [bash_tool, create_file, present_files]
+---
+
+# UP District Mapper Skill
+
+Produces three types of outputs from a single conversation:
+1. **Interactive HTML map** — D3 + TopoJSON choropleth of all 75 UP districts
+2. **Excel workbook** — district summary, municipal bodies, division rollup, block lat/lon
+3. **Distance & travel-time sheet** — haversine + road factor from one origin to many block HQs
+
+---
+
+## Workflow overview
+
+```
+User provides origin + block list
+        │
+        ▼
+1. Parse inputs (coordinates / named location)
+2. Compute haversine distances
+3. Apply road sinuosity factor (×1.3 for UP)
+4. Compute travel time (÷ 40 km/h)
+5. Build styled .xlsx with one tab
+6. Recalculate formulas via recalc script
+7. present_files() to user
+```
+
+---
+
+## Required inputs from user
+
+| Input | Format | Example |
+|-------|--------|---------|
+| **Origin location** | Lat,Lon decimal OR Google Maps short link | `25.423038,81.938293` or `maps.app.goo.gl/…` |
+| **Block list** | Tab/space-separated rows: Block · District · Division · Lat · Lon | Paste from the Excel sheet or any table |
+| **Output type** | "sheet", "map", "distance", or "full workbook" | "create a sheet for this" |
+
+> If the user pastes a Google Maps short link, extract coordinates from the redirect URL's query string (`?q=LAT,LON`). Use `web_fetch` on the short URL to get the destination URL.
+
+---
+
+## Key constants (do NOT change — calibrated for UP)
+
+```python
+ROAD_SINUOSITY = 1.3      # UP rural road network factor
+AVG_SPEED_KMPH = 40       # average speed on district/state roads
+EARTH_RADIUS_KM = 6371.0  # for haversine
+```
+
+---
+
+## Haversine formula
+
+```python
+import math
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+    return R * 2 * math.asin(math.sqrt(a))
+
+def road_km(straight_km):
+    return round(straight_km * 1.3, 1)
+
+def travel_time(road_km):
+    mins = road_km / 40 * 60
+    h, m = int(mins // 60), int(round(mins % 60))
+    return (f"{h}h {m:02d}m" if h > 0 else f"{m}m"), round(mins)
+```
+
+---
+
+## Excel sheet structure (distance output)
+
+### Columns (A–J)
+| Col | Header | Notes |
+|-----|--------|-------|
+| A | # | Sequential row number |
+| B | Block HQ | Block name |
+| C | District | Colour-banded by district |
+| D | Division | Colour-banded by district |
+| E | Latitude | 4 decimal places `0.0000` |
+| F | Longitude | 4 decimal places `0.0000` |
+| G | Straight-line (km) | Haversine result, format `0.0` |
+| H | Est. Road Dist. (km) | `G × 1.3`, format `0.0` |
+| I | Est. Travel Time | Colour-coded (green/amber/red) |
+| J | Route in Maps | `HYPERLINK` formula to Google Maps directions |
+
+### Hyperlink formula pattern
+```
+=HYPERLINK("https://www.google.com/maps/dir/{ORIGIN_LAT},{ORIGIN_LON}/{DEST_LAT},{DEST_LON}","Get Directions")
+```
+
+### Travel time colour coding
+| Condition | Background | Font colour |
+|-----------|------------|-------------|
+| < 30 min | `#D1FAE5` | `#065F46` |
+| 30–60 min | `#FEF3C7` | `#92400E` |
+| > 60 min | `#FEE2E2` | `#991B1B` |
+
+### Header style
+- Fill: `#2D3748` (dark slate)
+- Font: Arial 10 Bold White
+- Row height: 30
+
+### Data rows
+- Alternate fills: `#F7F6F2` / `#FFFFFF`
+- District column colour-banded (assign per division/district palette)
+- Sort: ascending by straight-line distance
+
+### Footer rows
+- Average row (AVERAGE formula over G and H columns)
+- Spacer row
+- Legend row (travel time colours + district colour key)
+
+---
+
+## Full UP workbook structure (4 sheets)
+
+| Sheet | Content |
+|-------|---------|
+| District Summary | 75 rows — area, pop, density, blocks, urban %, top city |
+| Municipal Bodies | One row per municipal body (Nagar Nigam / NPP / NP / authority) |
+| Division Summary | 18 division rollups |
+| Blocks - Lat & Lon | ~825 block HQs with lat/lon and Maps hyperlink |
+
+See the canonical district + block data tables in `references/district_data.md` and `references/block_data.md`.
+
+---
+
+## Interactive HTML map
+
+- Library: D3 v7 + TopoJSON v3 (cdnjs)
+- Boundary source: `cdn.jsdelivr.net/gh/guneetnarula/indian-district-boundaries@master/topojson/state-wise/uttarpradesh.json`
+- Projection: `d3.geoMercator().fitSize()`
+- Choropleth: population density buckets (< 400 / 400–800 / 800–1200 / 1200–2000 / > 2000)
+- On click: sidebar panel with geo-calculated area (haversine on GeoJSON), census area, density, blocks, municipal list
+- Self-contained single `.html` file — no server needed, opens with double-click
+
+### District name aliases (GeoJSON → canonical)
+```js
+const ALIASES = {
+  "Allahabad":"Prayagraj", "Faizabad":"Ayodhya",
+  "Kheri":"Lakhimpur Kheri", "Sant Ravidas Nagar":"Bhadohi",
+  "Ramabai Nagar":"Kanpur Dehat", "Kanshiram Nagar":"Kasganj",
+  "Prabuddh Nagar":"Shamli", "Gautam Budh Nagar":"Gautam Buddha Nagar",
+  "Siddharth Nagar":"Siddharthnagar", "Jyotiba Phule Nagar":"Amroha",
+  "Mahamaya Nagar":"Hathras", "Bagpat":"Baghpat",
+  "Kushi Nagar":"Kushinagar", "Bijnour":"Bijnor"
+}
+```
+
+---
+
+## Census 2011 block counts (authoritative — do not deviate)
+
+Use these as ground truth when auditing block data. Any mismatch = fix the data.
+
+```
+Agra:15  Firozabad:7  Mainpuri:9  Mathura:10
+Aligarh:12  Etah:8  Hathras:6  Kasganj:8
+Prayagraj:20  Fatehpur:13  Kaushambi:8  Pratapgarh:17
+Azamgarh:22  Ballia:17  Mau:9
+Bareilly:15  Budaun:15  Pilibhit:7  Shahjahanpur:15
+Basti:14  Sant Kabir Nagar:7  Siddharthnagar:14
+Banda:8  Chitrakoot:7  Hamirpur:7  Mahoba:4
+Bahraich:14  Balrampur:9  Gonda:16  Shravasti:4
+Ayodhya:8  Ambedkar Nagar:9  Amethi:10  Barabanki:15  Sultanpur:23
+Deoria:16  Gorakhpur:19  Kushinagar:14  Maharajganj:12
+Jalaun:9  Jhansi:8  Lalitpur:6
+Auraiya:7  Etawah:8  Farrukhabad:7  Kannauj:8
+Kanpur Dehat:10  Kanpur Nagar:10
+Hardoi:19  Lakhimpur Kheri:15  Lucknow:8  Raebareli:21
+Sitapur:19  Unnao:16
+Baghpat:5  Bulandshahr:16  Gautam Buddha Nagar:6
+Ghaziabad:5  Hapur:4  Meerut:12
+Bhadohi:5  Mirzapur:12  Sonbhadra:8
+Amroha:7  Bijnor:11  Moradabad:9  Rampur:6  Sambhal:8
+Muzaffarnagar:9  Saharanpur:9  Shamli:5
+Chandauli:9  Ghazipur:16  Jaunpur:21  Varanasi:8
+```
+
+---
+
+## Common mistakes to avoid
+
+| Mistake | Correct approach |
+|---------|-----------------|
+| Assigning blocks to wrong district after 2008/2011 reorganisation | Etah blocks → Kasganj; Moradabad blocks → Sambhal |
+| Duplicate block entries with spelling variants | Deduplicate before writing; one canonical spelling only |
+| Blocks from a newly carved district still listed under parent | Always use post-2011 district boundaries |
+| Using `localStorage` in HTML artifacts | Use in-memory JS state only |
+| Sheet name with `/` in openpyxl | Use `&` or `-` instead |
+| Fetching CDN URLs not previously seen in conversation | Pre-approved: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net/gh/guneetnarula/…` |
+
+---
+
+## Recalculation step (required)
+
+After saving the workbook, always run:
+```bash
+python3 /mnt/skills/public/xlsx/scripts/recalc.py <path>.xlsx 30
+```
+Check `total_errors == 0` before presenting the file.
+
+---
+
+## Output checklist
+
+- [ ] File saved to `/home/claude/` first, then copied to `/mnt/user-data/outputs/`
+- [ ] `recalc.py` run with 0 errors
+- [ ] `present_files()` called with output path
+- [ ] Freeze panes set (`A5` for data sheets, `A6` for distance sheets)
+- [ ] Auto-filter applied to header row
+- [ ] `0.0000` number format on lat/lon columns
+- [ ] Hyperlinks use `HYPERLINK()` formula, not raw text
